@@ -45,7 +45,7 @@ jobs:
           [[ -n "$release_id" ]] || { echo "Draft release not found"; exit 1; }
           download_asset() {
             local filename="$1" asset_id
-            asset_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" --jq '.[] | select(.name == env.ASSET_NAME) | .id' ASSET_NAME="$filename" | head -n 1)"
+            asset_id="$(ASSET_NAME="$filename" gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" --jq '.[] | select(.name == env.ASSET_NAME) | .id' | head -n 1)"
             [[ -n "$asset_id" ]] || { echo "Asset missing: $filename"; return 1; }
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id" > "work/$filename"
             test -s "work/$filename"
