@@ -1,0 +1,42 @@
+name: Private Workbench Smoke Test
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/private-workbench-smoke.yml'
+      - 'scripts/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python scripts
+        run: python3 -m compileall -q scripts
+      - name: Create authorized synthetic test IPA
+        run: |
+          python3 - <<'PY'
+          import zipfile, plistlib
+          info={'CFBundleIdentifier':'org.example.omniforge.synthetic','CFBundleName':'Synthetic','CFBundleExecutable':'Synthetic','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','MinimumOSVersion':'17.0'}
+          with zipfile.ZipFile('synthetic.ipa','w') as z:
+              z.writestr('Payload/Synthetic.app/Info.plist',plistlib.dumps(info))
+              z.writestr('Payload/Synthetic.app/Synthetic',b'not a Mach-O; smoke fixture only')
+              z.writestr('Payload/Synthetic.app/config.json',b'{"ok":true}')
+          PY
+      - name: Verify metadata inventory and rebuild path
+        run: |
+          python3 scripts/ipa_workbench.py inspect synthetic.ipa results
+          python3 scripts/auto_rebuild_path.py synthetic.ipa results/BuildDecision
+          test -s results/metadata.json
+          test -s results/file_inventory.txt
+          test -s results/BuildDecision/decision.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('results/metadata.json'))
+          assert x['CFBundleIdentifier']=='org.example.omniforge.synthetic'
+          y=json.load(open('results/BuildDecision/decision.json'))
+          assert y['resource_patch_supported'] is True
+          print('PASS: synthetic IPA inspect and patch classification')
+          PY
