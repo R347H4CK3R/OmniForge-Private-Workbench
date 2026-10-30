@@ -41,14 +41,34 @@ jobs:
           [[ "$IPA_ASSET" == *.ipa && "$IPA_ASSET" != */* && "$IPA_ASSET" != *..* ]] || exit 1
           # Draft releases are not discoverable by gh release download.
           # Find the draft by tag using authenticated repository release listing.
-          release_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .id' | head -n 1)"
-          [[ -n "$release_id" ]] || { echo "Draft release not found"; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > work/releases.json
+          python3 - "$RELEASE_TAG" <<'PY' > work/release-id.txt
+import json,sys
+entries=json.load(open("work/releases.json"))
+matches=[x for x in entries if x.get("tag_name")==sys.argv[1]]
+if len(matches)!=1: raise SystemExit("Expected exactly one matching draft release")
+print(matches[0]["id"])
+PY
+          release_id="$(cat work/release-id.txt)"
           download_asset() {
             local filename="$1" asset_id
-            asset_id="$(ASSET_NAME="$filename" gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" --jq '.[] | select(.name == env.ASSET_NAME) | .id' | head -n 1)"
-            [[ -n "$asset_id" ]] || { echo "Asset missing: $filename"; return 1; }
+            gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" > work/assets.json
+            asset_id="$(python3 - "$filename" <<'PY'
+import json,sys
+items=json.load(open("work/assets.json"))
+matches=[x for x in items if x.get("name")==sys.argv[1]]
+if len(matches)!=1: raise SystemExit("Expected exactly one matching release asset")
+print(matches[0]["id"])
+PY
+)"
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id" > "work/$filename"
             test -s "work/$filename"
+            if [[ "$filename" == *.ipa ]]; then
+              python3 - "$filename" <<'PY'
+import sys,zipfile
+assert zipfile.is_zipfile("work/"+sys.argv[1]), "Downloaded IPA is not a ZIP archive"
+PY
+            fi
           }
           download_asset "$IPA_ASSET"
           if [[ -n "$RESOURCE_ASSET" ]]; then
