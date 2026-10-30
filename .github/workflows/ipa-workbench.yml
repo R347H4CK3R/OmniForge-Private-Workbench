@@ -39,10 +39,21 @@ jobs:
           set -euo pipefail
           mkdir -p work results
           [[ "$IPA_ASSET" == *.ipa && "$IPA_ASSET" != */* && "$IPA_ASSET" != *..* ]] || exit 1
-          gh release download "$RELEASE_TAG" --pattern "$IPA_ASSET" --dir work
+          # Draft releases are not discoverable by gh release download.
+          # Find the draft by tag using authenticated repository release listing.
+          release_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .id' | head -n 1)"
+          [[ -n "$release_id" ]] || { echo "Draft release not found"; exit 1; }
+          download_asset() {
+            local filename="$1" asset_id
+            asset_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" --jq '.[] | select(.name == env.ASSET_NAME) | .id' ASSET_NAME="$filename" | head -n 1)"
+            [[ -n "$asset_id" ]] || { echo "Asset missing: $filename"; return 1; }
+            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id" > "work/$filename"
+            test -s "work/$filename"
+          }
+          download_asset "$IPA_ASSET"
           if [[ -n "$RESOURCE_ASSET" ]]; then
             [[ "$RESOURCE_ASSET" != */* && "$RESOURCE_ASSET" != *..* ]] || exit 1
-            gh release download "$RELEASE_TAG" --pattern "$RESOURCE_ASSET" --dir work
+            download_asset "$RESOURCE_ASSET"
           fi
       - name: Validate and inspect IPA
         shell: bash
