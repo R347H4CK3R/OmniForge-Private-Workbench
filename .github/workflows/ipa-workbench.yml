@@ -23,7 +23,7 @@ on:
         required: false
         type: string
 permissions:
-  contents: read
+  contents: write
 jobs:
   analyze:
     runs-on: macos-15
