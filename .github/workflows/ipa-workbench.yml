@@ -1,9 +1,6 @@
 name: IPA Workbench (macOS)
 run-name: IPA Workbench — ${{ inputs.release_tag || 'default-test' }}
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/ipa-workbench.yml']
   workflow_dispatch:
     inputs:
       release_tag:
@@ -30,8 +27,8 @@ jobs:
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag || 'analysis-c941c4d9-7376-4176-b072-904e354b3800' }}
-      IPA_ASSET: ${{ inputs.ipa_asset || 'input.ipa' }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      IPA_ASSET: ${{ inputs.ipa_asset }}
       RESOURCE_ASSET: ${{ inputs.resource_asset }}
       RESOURCE_PATH: ${{ inputs.resource_path }}
     steps:
