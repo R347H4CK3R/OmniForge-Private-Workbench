@@ -39,42 +39,22 @@ jobs:
           set -euo pipefail
           mkdir -p work results
           [[ "$IPA_ASSET" == *.ipa && "$IPA_ASSET" != */* && "$IPA_ASSET" != *..* ]] || exit 1
-          # Draft releases are not discoverable by gh release download.
-          # Find the draft by tag using authenticated repository release listing.
           gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > work/releases.json
-          python3 - "$RELEASE_TAG" <<'PY' > work/release-id.txt
-import json,sys
-entries=json.load(open("work/releases.json"))
-matches=[x for x in entries if x.get("tag_name")==sys.argv[1]]
-if len(matches)!=1: raise SystemExit("Expected exactly one matching draft release")
-print(matches[0]["id"])
-PY
-          release_id="$(cat work/release-id.txt)"
+          release_id=$(jq -r --arg tag "$RELEASE_TAG" '.[] | select(.tag_name == $tag) | .id' work/releases.json | head -n 1)
+          test -n "$release_id" || { echo 'Draft release not found'; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" > work/assets.json
           download_asset() {
             local filename="$1" asset_id
-            gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets" > work/assets.json
-            asset_id="$(python3 - "$filename" <<'PY'
-import json,sys
-items=json.load(open("work/assets.json"))
-matches=[x for x in items if x.get("name")==sys.argv[1]]
-if len(matches)!=1: raise SystemExit("Expected exactly one matching release asset")
-print(matches[0]["id"])
-PY
-)"
-            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id" > "work/$filename"
-            test -s "work/$filename"
-            if [[ "$filename" == *.ipa ]]; then
-              python3 - "$filename" <<'PY'
-import sys,zipfile
-assert zipfile.is_zipfile("work/"+sys.argv[1]), "Downloaded IPA is not a ZIP archive"
-PY
-            fi
+            asset_id=$(jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' work/assets.json | head -n 1)
+            test -n "$asset_id" || { echo 'Asset not found'; return 1; }
+            gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "work/${filename}"
+            test -s "work/${filename}"
           }
           download_asset "$IPA_ASSET"
           if [[ -n "$RESOURCE_ASSET" ]]; then
-            [[ "$RESOURCE_ASSET" != */* && "$RESOURCE_ASSET" != *..* ]] || exit 1
             download_asset "$RESOURCE_ASSET"
           fi
+          python3 -m zipfile -t "work/$IPA_ASSET"
       - name: Validate and inspect IPA
         shell: bash
         run: |
