@@ -1,0 +1,52 @@
+name: Sign announce notification shortcuts
+on:
+  push:
+    branches: [codex/announce-shortcuts-20261115]
+permissions:
+  contents: read
+jobs:
+  sign:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Generate and sign single-action shortcuts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p unsigned signed
+          python3 - <<'PY'
+          import plistlib, pathlib, subprocess, hashlib, json
+          evidence = []
+          for label, enabled in [('On', True), ('Off', False)]:
+              name = 'Announce Notifications ' + label
+              document = {
+                  'WFWorkflowName': name,
+                  'WFWorkflowClientVersion': '3036.0.4.2',
+                  'WFWorkflowMinimumClientVersion': 900,
+                  'WFWorkflowMinimumClientVersionString': '900',
+                  'WFWorkflowIcon': {'WFWorkflowIconStartColor': 4282601983, 'WFWorkflowIconGlyphNumber': 59511},
+                  'WFWorkflowTypes': [],
+                  'WFWorkflowInputContentItemClasses': [],
+                  'WFWorkflowActions': [{
+                      'WFWorkflowActionIdentifier': 'is.workflow.actions.announcenotifications.set',
+                      'WFWorkflowActionParameters': {'operation': 'Turn', 'OnValue': enabled}
+                  }]
+              }
+              source = pathlib.Path('unsigned') / (name + '.shortcut')
+              target = pathlib.Path('signed') / source.name
+              source.write_bytes(plistlib.dumps(document, fmt=plistlib.FMT_BINARY))
+              assert plistlib.loads(source.read_bytes()) == document
+              subprocess.run(['/usr/bin/shortcuts', 'sign', '--mode', 'anyone', '--input', str(source), '--output', str(target)], check=True, timeout=120)
+              data = target.read_bytes()
+              assert len(data) > 0 and data != source.read_bytes(), 'Expected a signed container'
+              evidence.append({'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'action': document['WFWorkflowActions'][0], 'sign_exit': 0, 'ios_import_tested': False})
+          pathlib.Path('signed/verification.json').write_text(json.dumps(evidence, indent=2))
+          print(json.dumps(evidence, indent=2))
+          PY
+      - name: Upload signed files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Announce-Notifications-Signed-Shortcuts
+          path: signed/
+          if-no-files-found: error
+          retention-days: 30
